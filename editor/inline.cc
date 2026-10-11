@@ -46,6 +46,15 @@ bool closerAt(std::string_view src, size_t i, size_t limit, char c0, char c1, in
     return i + 1 < limit && src[i + 1] == c1;
 }
 
+bool hasCloserAhead(std::string_view src, size_t i, size_t limit, char c0, char c1, int n) {
+    if (n <= 0) return true;
+    while (i + static_cast<size_t>(n) <= limit) {
+        if (closerAt(src, i, limit, c0, c1, n)) return true;
+        ++i;
+    }
+    return false;
+}
+
 bool tryCode(Scanner& sc, size_t pos, size_t limit, size_t* next) {
     if (pos >= limit || sc.src[pos] != '`') return false;
     size_t i = pos + 1;
@@ -73,19 +82,50 @@ bool tryLink(Scanner& sc, size_t pos, size_t limit, size_t* next) {
 }
 
 bool scanDelimited(Scanner& sc, size_t pos, size_t limit, char c0, char c1, int closerLen,
+                   SpanRole role, bool canStrong, bool canEm, size_t* outPos);
+
+bool tryInner(Scanner& sc, size_t pos, size_t limit, char innerC0, char innerC1, int innerLen,
+              SpanRole innerRole, bool innerCanStrong, bool innerCanEm,
+              char outerC0, char outerC1, int outerLen, size_t* next) {
+    size_t snapD = sc.display.size();
+    size_t snapS = sc.spans.size();
+    size_t n = 0;
+    if (!scanDelimited(sc, pos, limit, innerC0, innerC1, innerLen, innerRole, innerCanStrong,
+                       innerCanEm, &n)) {
+        return false;
+    }
+    if (!hasCloserAhead(sc.src, n, limit, outerC0, outerC1, outerLen)) {
+        sc.display.resize(snapD);
+        sc.spans.resize(snapS);
+        return false;
+    }
+    *next = n;
+    return true;
+}
+
+bool scanDelimited(Scanner& sc, size_t pos, size_t limit, char c0, char c1, int closerLen,
                    SpanRole role, bool canStrong, bool canEm, size_t* outPos) {
     size_t snapD = sc.display.size();
     size_t snapS = sc.spans.size();
 
     size_t i = pos;
     while (i < limit) {
+        char c = sc.src[i];
+
+        if (canStrong && i + 1 < limit && (c == '*' || c == '_') && sc.src[i + 1] == c) {
+            SpanRole inner = canEm ? SpanRole::Strong : SpanRole::StrongEm;
+            size_t n = 0;
+            if (tryInner(sc, i + 2, limit, c, c, 2, inner, false, canEm, c0, c1, closerLen, &n)) {
+                i = n;
+                continue;
+            }
+        }
+
         if (closerAt(sc.src, i, limit, c0, c1, closerLen)) {
             if (i == pos) break;
             *outPos = i + static_cast<size_t>(closerLen);
             return true;
         }
-
-        char c = sc.src[i];
 
         if (c == '\\' && i + 1 < limit && isEscapable(sc.src[i + 1])) {
             sc.emit(i, i + 2, sc.src.substr(i + 1, 1), role);
@@ -109,17 +149,10 @@ bool scanDelimited(Scanner& sc, size_t pos, size_t limit, char c0, char c1, int 
             continue;
         }
 
-        if (canStrong && i + 1 < limit && (c == '*' || c == '_') && sc.src[i + 1] == c) {
-            SpanRole inner = canEm ? SpanRole::Strong : SpanRole::StrongEm;
-            if (scanDelimited(sc, i + 2, limit, c, c, 2, inner, false, canEm, &n)) {
-                i = n;
-                continue;
-            }
-        }
-
         if (canEm && (c == '*' || c == '_')) {
             SpanRole inner = canStrong ? SpanRole::Em : SpanRole::StrongEm;
-            if (scanDelimited(sc, i + 1, limit, c, 0, 1, inner, canStrong, false, &n)) {
+            if (tryInner(sc, i + 1, limit, c, 0, 1, inner, canStrong, false, c0, c1, closerLen,
+                         &n)) {
                 i = n;
                 continue;
             }

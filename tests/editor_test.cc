@@ -275,6 +275,35 @@ static void test_paragraph_join() {
     assert(s->sourceEnd == 6);
 }
 
+static void test_unmatched_star_inside_strong() {
+    std::string_view src = "**5 * 3**";
+    InlineRun run = scanInlines(src, 0, src.size());
+    assert(run.display == "5 * 3");
+    const Span* five = spanCovering(run, 0);
+    assert(five);
+    assert(five->role == SpanRole::Strong);
+    assert(run.display.find('*') != std::string::npos);
+}
+
+static void test_strong_inside_em() {
+    std::string_view src = "*see **this** now*";
+    InlineRun run = scanInlines(src, 0, src.size());
+    assert(run.display == "see this now");
+    const Span* see = spanCovering(run, 0);
+    assert(see);
+    assert(see->role == SpanRole::Em);
+    size_t thisOff = run.display.find("this");
+    assert(thisOff != std::string::npos);
+    const Span* inner = spanCovering(run, thisOff);
+    assert(inner);
+    assert(inner->role == SpanRole::StrongEm);
+    size_t nowOff = run.display.find(" now");
+    assert(nowOff != std::string::npos);
+    const Span* tail = spanCovering(run, nowOff);
+    assert(tail);
+    assert(tail->role == SpanRole::Em);
+}
+
 int main() {
     test_insert_codepoint_undo();
     test_coalesce_breaks_on_newline();
@@ -297,5 +326,7 @@ int main() {
     test_strong_em();
     test_escape();
     test_paragraph_join();
+    test_unmatched_star_inside_strong();
+    test_strong_inside_em();
     return 0;
 }
