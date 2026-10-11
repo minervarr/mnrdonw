@@ -1,4 +1,5 @@
 #include "document.hh"
+#include "inline.hh"
 #include "parse.hh"
 #include "utf8.hh"
 
@@ -185,6 +186,95 @@ static void test_quote_marker() {
     assert(c[bc[0].contentBegin] == '>');
 }
 
+static const Span* spanCovering(const InlineRun& run, size_t displayOff) {
+    for (const Span& s : run.spans) {
+        if (s.displayBegin <= displayOff && displayOff < s.displayEnd) return &s;
+    }
+    return nullptr;
+}
+
+static void test_bold_hit_lands_on_letter() {
+    std::string_view src = "**bold**";
+    InlineRun run = scanInlines(src, 0, src.size());
+    assert(run.display == "bold");
+    const Span* s = spanCovering(run, 0);
+    assert(s);
+    assert(s->sourceBegin == 2);
+    assert(s->role == SpanRole::Strong);
+}
+
+static void test_em_code_link() {
+    std::string_view emSrc = "*em*";
+    InlineRun em = scanInlines(emSrc, 0, emSrc.size());
+    assert(em.display == "em");
+    const Span* emSpan = spanCovering(em, 0);
+    assert(emSpan);
+    assert(emSpan->role == SpanRole::Em);
+    assert(emSpan->sourceBegin == 1);
+
+    std::string_view codeSrc = "`code`";
+    InlineRun code = scanInlines(codeSrc, 0, codeSrc.size());
+    assert(code.display == "code");
+    const Span* codeSpan = spanCovering(code, 0);
+    assert(codeSpan);
+    assert(codeSpan->role == SpanRole::Code);
+
+    std::string_view linkSrc = "[name](url)";
+    InlineRun link = scanInlines(linkSrc, 0, linkSrc.size());
+    assert(link.display == "name");
+    assert(link.display.find("url") == std::string::npos);
+    const Span* linkSpan = spanCovering(link, 0);
+    assert(linkSpan);
+    assert(linkSpan->role == SpanRole::Link);
+}
+
+static void test_unclosed_marker() {
+    std::string_view src = "**bold";
+    InlineRun run = scanInlines(src, 0, src.size());
+    assert(run.display == "**bold");
+    for (const Span& s : run.spans) {
+        assert(s.role == SpanRole::Plain);
+    }
+}
+
+static void test_strong_em() {
+    std::string_view aSrc = "**_x_**";
+    InlineRun a = scanInlines(aSrc, 0, aSrc.size());
+    assert(a.display == "x");
+    const Span* aSpan = spanCovering(a, 0);
+    assert(aSpan);
+    assert(aSpan->role == SpanRole::StrongEm);
+
+    std::string_view bSrc = "_**x**_";
+    InlineRun b = scanInlines(bSrc, 0, bSrc.size());
+    assert(b.display == "x");
+    const Span* bSpan = spanCovering(b, 0);
+    assert(bSpan);
+    assert(bSpan->role == SpanRole::StrongEm);
+}
+
+static void test_escape() {
+    std::string_view src = "\\*";
+    InlineRun run = scanInlines(src, 0, src.size());
+    assert(run.display == "*");
+    const Span* s = spanCovering(run, 0);
+    assert(s);
+    assert(s->sourceBegin == 0);
+    assert(s->sourceEnd == 2);
+}
+
+static void test_paragraph_join() {
+    std::string src = "hello\nworld\n";
+    InlineRun run = scanInlines(src, 0, 12);
+    assert(run.display == "hello world");
+    assert(run.display.empty() || run.display.back() != ' ');
+    assert(run.display[5] == ' ');
+    const Span* s = spanCovering(run, 5);
+    assert(s);
+    assert(s->sourceBegin == 5);
+    assert(s->sourceEnd == 6);
+}
+
 int main() {
     test_insert_codepoint_undo();
     test_coalesce_breaks_on_newline();
@@ -201,5 +291,11 @@ int main() {
     test_closed_fence();
     test_unknown_stays_paragraph();
     test_quote_marker();
+    test_bold_hit_lands_on_letter();
+    test_em_code_link();
+    test_unclosed_marker();
+    test_strong_em();
+    test_escape();
+    test_paragraph_join();
     return 0;
 }
