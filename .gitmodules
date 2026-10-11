@@ -1,0 +1,15 @@
+[submodule "libs/firstparty/framework/vk_canvas"]
+	path = libs/firstparty/framework/vk_canvas
+	url = https://github.com/minervarr/Vk_Canvas_Lb_LAW.git
+[submodule "libs/thirdparty/libjpeg-turbo"]
+	path = libs/thirdparty/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
+[submodule "libs/firstparty/framework/app_shell"]
+	path = libs/firstparty/framework/app_shell
+	url = https://github.com/minervarr/App_shell.git
+[submodule "libs/firstparty/archive_engine"]
+	path = libs/firstparty/archive_engine
+	url = https://github.com/minervarr/archive_engine
+[submodule "assets/fonts"]
+	path = assets/fonts
+	url = https://github.com/minervarr/fonts
