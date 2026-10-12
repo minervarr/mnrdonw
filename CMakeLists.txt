@@ -21,6 +21,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         editor/parse.cc
         editor/inline.cc
         editor/layout.cc
+        editor/save.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/firstparty/framework/vk_canvas/core/text_buffer.cc
     )
     target_include_directories(editor_test PRIVATE

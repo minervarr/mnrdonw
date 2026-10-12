@@ -2,12 +2,17 @@
 #include "inline.hh"
 #include "layout.hh"
 #include "parse.hh"
+#include "save.hh"
 #include "stub_measure.hh"
 #include "utf8.hh"
 
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 static void test_insert_codepoint_undo() {
@@ -475,6 +480,83 @@ static void test_fence_line_is_one_row() {
     assert(closeRows == 0);
 }
 
+static std::string cwdNow() {
+    char buf[4096];
+    assert(getcwd(buf, sizeof(buf)) != nullptr);
+    return buf;
+}
+
+static std::string makeTempDir() {
+    char tmpl[] = "/tmp/mnrdonw-XXXXXX";
+    char* p = mkdtemp(tmpl);
+    assert(p != nullptr);
+    return p;
+}
+
+static void writeFile(const std::string& path, const std::string& bytes) {
+    FILE* f = fopen(path.c_str(), "wb");
+    assert(f != nullptr);
+    assert(fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size());
+    assert(fclose(f) == 0);
+}
+
+static std::string readFile(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    assert(f != nullptr);
+    assert(fseek(f, 0, SEEK_END) == 0);
+    long n = ftell(f);
+    assert(n >= 0);
+    assert(fseek(f, 0, SEEK_SET) == 0);
+    std::string out(static_cast<size_t>(n), '\0');
+    assert(fread(out.data(), 1, out.size(), f) == out.size());
+    assert(fclose(f) == 0);
+    return out;
+}
+
+static bool fileExists(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0;
+}
+
+static void test_save_round_trip() {
+    std::string dir = makeTempDir();
+    std::string path = dir + "/note.md";
+    SaveResult r = saveBuffer("hello\n", path);
+    assert(r.ok);
+    assert(r.path == path);
+    assert(readFile(path) == "hello\n");
+    assert(!fileExists(dir + "/note.md.tmp"));
+}
+
+static void test_failed_save_keeps_original() {
+    std::string dir = makeTempDir();
+    writeFile(dir + "/note.md", "old");
+    SaveResult r = saveBuffer("new", dir + "/missing/note.md");
+    assert(!r.ok);
+    assert(!r.error.empty());
+    assert(readFile(dir + "/note.md") == "old");
+    assert(!fileExists(dir + "/missing"));
+}
+
+static void test_untitled() {
+    std::string home = cwdNow();
+
+    std::string dir1 = makeTempDir();
+    assert(chdir(dir1.c_str()) == 0);
+    SaveResult r1 = saveBuffer("hi", "");
+    assert(chdir(home.c_str()) == 0);
+    assert(r1.ok);
+    assert(readFile(dir1 + "/untitled.md") == "hi");
+
+    std::string dir2 = makeTempDir();
+    writeFile(dir2 + "/untitled.md", "old");
+    assert(chdir(dir2.c_str()) == 0);
+    SaveResult r2 = saveBuffer("new", "");
+    assert(chdir(home.c_str()) == 0);
+    assert(!r2.ok);
+    assert(readFile(dir2 + "/untitled.md") == "old");
+}
+
 int main() {
     test_insert_codepoint_undo();
     test_coalesce_breaks_on_newline();
@@ -506,5 +588,8 @@ int main() {
     test_hit_rendered_bold();
     test_move_vertical_keeps_x();
     test_fence_line_is_one_row();
+    test_save_round_trip();
+    test_failed_save_keeps_original();
+    test_untitled();
     return 0;
 }
