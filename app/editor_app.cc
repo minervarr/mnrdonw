@@ -285,18 +285,20 @@ void EditorApp::layoutNow() {
     geom_.lineH = measurer_->lineHeight(geom_.body);
     const float nWidth = canvas_->textWidthStyled("n", geom_.body, FontStyle::Roman);
     const float maxW = std::max(0.f, canvas_->w() - 2.f * geom_.ui.space(32.f));
-    geom_.columnW = std::min(maxW, 70.f * nWidth);
-    if (geom_.columnW < 1.f) geom_.columnW = std::max(1.f, canvas_->w());
-    geom_.columnX = canvas_->left() + (canvas_->w() - geom_.columnW) * 0.5f;
+    float wrapW = std::min(maxW, 70.f * nWidth);
+    if (wrapW < 1.f) wrapW = std::max(1.f, canvas_->w());
 
     geom_.lm.body = geom_.body;
     geom_.lm.h3 = geom_.body * kUiTypeRatio;
     geom_.lm.h2 = geom_.lm.h3 * kUiTypeRatio;
     geom_.lm.h1 = geom_.lm.h2 * kUiTypeRatio;
-    geom_.lm.columnW = geom_.columnW;
+    geom_.lm.columnW = wrapW;
     geom_.lm.blockGap = geom_.ui.space(16.f);
     geom_.lm.listGap = geom_.ui.space(4.f);
     geom_.lm.gutter = 2.f * geom_.body;
+    // textX is the gutter and a full line is wrapW, so the chrome is both.
+    geom_.columnW = wrapW + geom_.lm.gutter;
+    geom_.columnX = canvas_->left() + (canvas_->w() - geom_.columnW) * 0.5f;
 
     blocks_ = parseBlocks(doc_.text());
     page_ = layoutPage(doc_.text(), blocks_, doc_.cursor(), geom_.lm, *measurer_);
