@@ -90,7 +90,20 @@ bool tryInner(Scanner& sc, size_t pos, size_t limit, char innerC0, char innerC1,
     size_t snapD = sc.display.size();
     size_t snapS = sc.spans.size();
     size_t n = 0;
-    if (!scanDelimited(sc, pos, limit, innerC0, innerC1, innerLen, innerRole, innerCanStrong,
+    // A longer outer closer (emphasis inside strong) must stay intact. A later
+    // pair does not license an inner span that would read those bytes.
+    size_t innerLimit = limit;
+    if (outerLen > innerLen) {
+        size_t at = pos;
+        while (at + static_cast<size_t>(outerLen) <= limit) {
+            if (closerAt(sc.src, at, limit, outerC0, outerC1, outerLen)) {
+                innerLimit = at;
+                break;
+            }
+            ++at;
+        }
+    }
+    if (!scanDelimited(sc, pos, innerLimit, innerC0, innerC1, innerLen, innerRole, innerCanStrong,
                        innerCanEm, &n)) {
         return false;
     }

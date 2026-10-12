@@ -54,7 +54,7 @@ private:
     void pokeCaret();
     void clampScroll();
     void ensureCaretVisible();
-    void placeCaret(size_t pos, bool extend, bool vertical);
+    void placeCaret(size_t pos, bool extend, bool vertical, bool keepEndPin = false);
 
     std::unique_ptr<Host> host_;
     std::unique_ptr<MsdfFont> font_;
@@ -79,5 +79,9 @@ private:
     bool preferredValid_ = false;
     float preferredX_ = 0;
     float scroll_ = 0;
+    // End on a hard wrap shares its byte with the next row's sourceBegin.
+    // Drawing and ensureCaretVisible keep the row that ends on that byte.
+    bool endPin_ = false;
+    size_t endPinByte_ = 0;
     double lastClickSec_ = -1.0e9;
 };

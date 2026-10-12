@@ -38,3 +38,4 @@ size_t hitTest(const Page& page, float x, float y, const Measurer& measure);
 float caretX(const Page& page, size_t cursorByte, const Measurer& measure);
 size_t moveVertical(const Page& page, size_t cursorByte, float preferredX,
                     int direction, const Measurer& measure);
+size_t visualRowEnd(const Page& page, size_t rowIndex, std::string_view text);

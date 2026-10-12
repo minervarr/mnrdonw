@@ -446,3 +446,19 @@ size_t moveVertical(const Page& page, size_t cursorByte, float preferredX, int d
     const Row& r = page.rows[i];
     return hitTest(page, preferredX, r.y + r.h * 0.5f, measure);
 }
+
+size_t visualRowEnd(const Page& page, size_t rowIndex, std::string_view text) {
+    if (page.rows.empty()) return 0;
+    if (rowIndex >= page.rows.size()) rowIndex = page.rows.size() - 1;
+    const Row& row = page.rows[rowIndex];
+    if (rowIndex + 1 >= page.rows.size()) return row.sourceEnd;
+    if (row.sourceEnd == row.sourceBegin || row.sourceEnd == 0 || row.sourceEnd > text.size()) {
+        return row.sourceEnd;
+    }
+    const Row& next = page.rows[rowIndex + 1];
+    const char prev = text[row.sourceEnd - 1];
+    if (next.sourceBegin == row.sourceEnd && (prev == ' ' || prev == '\n')) {
+        return row.sourceEnd - 1;
+    }
+    return row.sourceEnd;
+}

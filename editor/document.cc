@@ -204,6 +204,7 @@ void Document::deleteSelectionAsReplace(std::string inserted) {
 }
 
 void Document::insertText(std::string_view utf8) {
+    if (utf8.empty()) return;
     size_t c = cursor();
     size_t a = anchor_;
     if (a != c) {
@@ -211,7 +212,6 @@ void Document::insertText(std::string_view utf8) {
         return;
     }
     std::string piece(utf8);
-    if (piece.empty()) return;
     if (try_coalesce(c, piece)) {
         insertBytes(c, piece);
         buf_.move_cursor_to(c + piece.size());

@@ -50,7 +50,13 @@ size_t mapSpanToSource(const Span& s, size_t displayOff) {
     return s.sourceBegin;
 }
 
-size_t rowIndexFor(const Page& page, size_t cursorByte) {
+size_t rowIndexFor(const Page& page, size_t cursorByte, bool pinEnd, size_t pinByte) {
+    if (pinEnd && cursorByte == pinByte) {
+        for (size_t i = 0; i < page.rows.size(); ++i) {
+            const Row& r = page.rows[i];
+            if (r.sourceBegin != r.sourceEnd && r.sourceEnd == cursorByte) return i;
+        }
+    }
     size_t found = 0;
     bool any = false;
     for (size_t i = 0; i < page.rows.size(); ++i) {
@@ -71,20 +77,10 @@ size_t rowIndexFor(const Page& page, size_t cursorByte) {
     return found;
 }
 
-// Last caret byte that still belongs to this visual row. A following row that
-// starts at sourceEnd would otherwise steal End and Home-of-the-next-line.
+// End goes through visualRowEnd. A hard wrap keeps sourceEnd; a newline or
+// soft-break space keeps that byte so the caret stays on this row.
 size_t rowEndByte(const Page& page, size_t index, std::string_view text) {
-    const Row& row = page.rows[index];
-    if (row.sourceBegin == row.sourceEnd) return row.sourceBegin;
-    size_t end = row.sourceEnd;
-    if (index + 1 < page.rows.size()) {
-        const Row& next = page.rows[index + 1];
-        const bool nextOwns = (next.sourceBegin == next.sourceEnd && next.sourceBegin == end) ||
-                              (end >= next.sourceBegin && end < next.sourceEnd);
-        if (nextOwns) end = utf8Prev(text, end);
-    }
-    if (end < row.sourceBegin) return row.sourceBegin;
-    return end;
+    return visualRowEnd(page, index, text);
 }
 
 class CanvasMeasurer : public Measurer {
@@ -271,7 +267,7 @@ void EditorApp::clampScroll() {
 
 void EditorApp::ensureCaretVisible() {
     if (page_.rows.empty()) return;
-    const Row& row = page_.rows[rowIndexFor(page_, doc_.cursor())];
+    const Row& row = page_.rows[rowIndexFor(page_, doc_.cursor(), endPin_, endPinByte_)];
     if (row.y < scroll_) scroll_ = row.y;
     else if (row.y + row.h > scroll_ + geom_.viewH) scroll_ = row.y + row.h - geom_.viewH;
     clampScroll();
@@ -317,12 +313,18 @@ void EditorApp::layoutNow() {
     }
 }
 
-void EditorApp::placeCaret(size_t pos, bool extend, bool vertical) {
+void EditorApp::placeCaret(size_t pos, bool extend, bool vertical, bool keepEndPin) {
+    if (!keepEndPin) endPin_ = false;
     if (extend) doc_.setSelection(doc_.anchor(), pos);
     else doc_.setSelection(pos, pos);
     layoutNow();
     if (!vertical && !page_.rows.empty()) {
-        preferredX_ = caretX(page_, doc_.cursor(), *measurer_);
+        if (endPin_ && doc_.cursor() == endPinByte_) {
+            const size_t idx = rowIndexFor(page_, doc_.cursor(), true, endPinByte_);
+            preferredX_ = xInRow(page_.rows[idx], doc_.cursor(), *measurer_);
+        } else {
+            preferredX_ = caretX(page_, doc_.cursor(), *measurer_);
+        }
         preferredValid_ = true;
     }
     ensureCaretVisible();
@@ -374,6 +376,7 @@ void EditorApp::handleInput() {
     host_->setCursor(overColumn ? CursorShape::Text : CursorShape::Arrow);
 
     auto refreshCaret = [this]() {
+        endPin_ = false;
         layoutNow();
         if (!page_.rows.empty()) {
             preferredX_ = caretX(page_, doc_.cursor(), *measurer_);
@@ -414,6 +417,7 @@ void EditorApp::handleInput() {
     } else if (dragging_ && in.pointerDown && !page_.rows.empty()) {
         const size_t hit = hitAtPointer();
         if (hit != doc_.cursor()) {
+            endPin_ = false;
             doc_.setSelection(doc_.anchor(), hit);
             layoutNow();
             if (!page_.rows.empty()) {
@@ -460,6 +464,10 @@ void EditorApp::handleInput() {
                 layoutNow();
                 ensureCaretVisible();
                 stale_ = true;
+            } else if (key == 'Z') {
+                if (doc_.undo()) mutated = true;
+            } else if (key == 'Y') {
+                if (doc_.redo()) mutated = true;
             } else if (key == key::Left) {
                 placeCaret(prevWord(doc_.text(), doc_.cursor()), extend, false);
             } else if (key == key::Right) {
@@ -474,7 +482,7 @@ void EditorApp::handleInput() {
 
         if (page_.rows.empty()) continue;
         const size_t cursor = doc_.cursor();
-        const size_t rowIndex = rowIndexFor(page_, cursor);
+        const size_t rowIndex = rowIndexFor(page_, cursor, endPin_, endPinByte_);
         const Row& row = page_.rows[rowIndex];
         if (key == key::Left) {
             if (!extend && doc_.anchor() != cursor) {
@@ -490,15 +498,34 @@ void EditorApp::handleInput() {
             }
         } else if (key == key::Up || key == key::Down) {
             if (!preferredValid_) {
-                preferredX_ = caretX(page_, cursor, *measurer_);
+                if (endPin_ && cursor == endPinByte_) {
+                    preferredX_ = xInRow(row, cursor, *measurer_);
+                } else {
+                    preferredX_ = caretX(page_, cursor, *measurer_);
+                }
                 preferredValid_ = true;
             }
             const int dir = key == key::Down ? 1 : -1;
-            placeCaret(moveVertical(page_, cursor, preferredX_, dir, *measurer_), extend, true);
+            size_t dest = moveVertical(page_, cursor, preferredX_, dir, *measurer_);
+            if (endPin_ && cursor == endPinByte_) {
+                size_t i = rowIndex;
+                if (dir > 0 && i + 1 < page_.rows.size()) ++i;
+                else if (dir < 0 && i > 0) --i;
+                const Row& destRow = page_.rows[i];
+                dest = hitTest(page_, preferredX_, destRow.y + destRow.h * 0.5f, *measurer_);
+            }
+            placeCaret(dest, extend, true);
         } else if (key == key::Home) {
             placeCaret(row.sourceBegin, extend, false);
         } else if (key == key::End) {
-            placeCaret(rowEndByte(page_, rowIndex, doc_.text()), extend, false);
+            const size_t endByte = rowEndByte(page_, rowIndex, doc_.text());
+            endPin_ = false;
+            if (rowIndex + 1 < page_.rows.size() && endByte == row.sourceEnd &&
+                endByte == page_.rows[rowIndex + 1].sourceBegin) {
+                endPin_ = true;
+                endPinByte_ = endByte;
+            }
+            placeCaret(endByte, extend, false, true);
         } else if (key == key::PageUp || key == key::PageDown) {
             if (!preferredValid_) {
                 preferredX_ = caretX(page_, cursor, *measurer_);
@@ -589,7 +616,8 @@ void EditorApp::draw() {
         i = j;
     }
 
-    const size_t caretRow = page_.rows.empty() ? 0 : rowIndexFor(page_, doc_.cursor());
+    const size_t caretRow =
+        page_.rows.empty() ? 0 : rowIndexFor(page_, doc_.cursor(), endPin_, endPinByte_);
     const size_t selLo = std::min(doc_.anchor(), doc_.cursor());
     const size_t selHi = std::max(doc_.anchor(), doc_.cursor());
     Color selection = col::accent;

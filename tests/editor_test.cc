@@ -79,6 +79,31 @@ static void test_selection_replace() {
     doc.insertText("X");
     assert(doc.text() == "aXd");
     assert(doc.cursor() == 2);
+    assert(doc.undo());
+    assert(doc.text() == "abcd");
+    assert(doc.cursor() == 3);
+    assert(doc.anchor() == 1);
+    assert(!doc.undo());
+}
+
+static void test_empty_insert_keeps_selection() {
+    Document doc;
+    doc.load("hello");
+    doc.setSelection(1, 4);
+    doc.insertText("");
+    assert(doc.text() == "hello");
+    assert(doc.cursor() == 4);
+    assert(doc.anchor() == 1);
+    assert(!doc.undo());
+
+    Document bare;
+    bare.load("hello");
+    bare.setSelection(2, 2);
+    bare.insertText("");
+    assert(bare.text() == "hello");
+    assert(bare.cursor() == 2);
+    assert(bare.anchor() == 2);
+    assert(!bare.undo());
 }
 
 static void test_enter_does_not_continue_list() {
@@ -293,6 +318,91 @@ static void test_unmatched_star_inside_strong() {
     assert(run.display.find('*') != std::string::npos);
 }
 
+static void test_nearest_emphasis_closer() {
+    {
+        std::string_view src = "**5 * 3** and **";
+        InlineRun run = scanInlines(src, 0, src.size());
+        assert(run.display == "5 * 3 and **");
+        const Span* head = spanCovering(run, 0);
+        assert(head);
+        assert(head->role == SpanRole::Strong);
+        const size_t star = run.display.find('*');
+        assert(star != std::string::npos);
+        const Span* starSpan = spanCovering(run, star);
+        assert(starSpan);
+        assert(starSpan->role == SpanRole::Strong);
+        const size_t trail = run.display.rfind("**");
+        assert(trail != std::string::npos);
+        const Span* trailSpan = spanCovering(run, trail);
+        assert(trailSpan);
+        assert(trailSpan->role == SpanRole::Plain);
+    }
+    {
+        std::string_view src = "**a * b** and **c**";
+        InlineRun run = scanInlines(src, 0, src.size());
+        assert(run.display == "a * b and c");
+        const Span* head = spanCovering(run, 0);
+        assert(head);
+        assert(head->role == SpanRole::Strong);
+        const size_t star = run.display.find('*');
+        assert(star != std::string::npos);
+        const Span* starSpan = spanCovering(run, star);
+        assert(starSpan);
+        assert(starSpan->role == SpanRole::Strong);
+        const size_t mid = run.display.find(" and ");
+        assert(mid != std::string::npos);
+        const Span* midSpan = spanCovering(run, mid);
+        assert(midSpan);
+        assert(midSpan->role == SpanRole::Plain);
+        const size_t c = run.display.rfind('c');
+        assert(c != std::string::npos);
+        const Span* cSpan = spanCovering(run, c);
+        assert(cSpan);
+        assert(cSpan->role == SpanRole::Strong);
+    }
+    {
+        std::string_view src = "__a _ b__ and __c__";
+        InlineRun run = scanInlines(src, 0, src.size());
+        assert(run.display == "a _ b and c");
+        const Span* head = spanCovering(run, 0);
+        assert(head);
+        assert(head->role == SpanRole::Strong);
+        const size_t score = run.display.find('_');
+        assert(score != std::string::npos);
+        const Span* scoreSpan = spanCovering(run, score);
+        assert(scoreSpan);
+        assert(scoreSpan->role == SpanRole::Strong);
+        const size_t mid = run.display.find(" and ");
+        assert(mid != std::string::npos);
+        const Span* midSpan = spanCovering(run, mid);
+        assert(midSpan);
+        assert(midSpan->role == SpanRole::Plain);
+        const size_t c = run.display.rfind('c');
+        assert(c != std::string::npos);
+        const Span* cSpan = spanCovering(run, c);
+        assert(cSpan);
+        assert(cSpan->role == SpanRole::Strong);
+    }
+    {
+        std::string_view src = "**a *b* c**";
+        InlineRun run = scanInlines(src, 0, src.size());
+        assert(run.display == "a b c");
+        const Span* head = spanCovering(run, 0);
+        assert(head);
+        assert(head->role == SpanRole::Strong);
+        const size_t b = run.display.find('b');
+        assert(b != std::string::npos);
+        const Span* bSpan = spanCovering(run, b);
+        assert(bSpan);
+        assert(bSpan->role == SpanRole::StrongEm);
+        const size_t c = run.display.find('c');
+        assert(c != std::string::npos);
+        const Span* cSpan = spanCovering(run, c);
+        assert(cSpan);
+        assert(cSpan->role == SpanRole::Strong);
+    }
+}
+
 static void test_strong_inside_em() {
     std::string_view src = "*see **this** now*";
     InlineRun run = scanInlines(src, 0, src.size());
@@ -416,14 +526,50 @@ static void test_wrap_codepoint() {
     std::vector<Block> blocks = parseBlocks(src);
     Page page = layoutPage(src, blocks, 0, m, measure);
     bool found = false;
-    for (const Row& r : page.rows) {
-        if (r.kind == BlockKind::Paragraph) {
-            assert(r.display.size() == 5);
+    for (size_t i = 0; i < page.rows.size(); ++i) {
+        const Row& r = page.rows[i];
+        if (r.kind != BlockKind::Paragraph) continue;
+        assert(r.display.size() == 5);
+        if (r.display == "abcde") {
+            assert(i + 1 < page.rows.size());
+            assert(r.sourceEnd == page.rows[i + 1].sourceBegin);
+            assert(visualRowEnd(page, i, src) == r.sourceEnd);
             found = true;
-            break;
         }
     }
     assert(found);
+
+    std::string nl = "abc\n";
+    std::vector<Block> nlBlocks = parseBlocks(nl);
+    Page nlPage = layoutPage(nl, nlBlocks, 0, m, measure);
+    bool nlFound = false;
+    for (size_t i = 0; i < nlPage.rows.size(); ++i) {
+        const Row& r = nlPage.rows[i];
+        if (r.display != "abc") continue;
+        const size_t end = visualRowEnd(nlPage, i, nl);
+        assert(end >= r.sourceBegin);
+        assert(end < r.sourceEnd);
+        assert(nl[end] == '\n');
+        nlFound = true;
+    }
+    assert(nlFound);
+
+    std::string soft = "\naaaaa bbbbb\n";
+    std::vector<Block> softBlocks = parseBlocks(soft);
+    Page softPage = layoutPage(soft, softBlocks, 0, m, measure);
+    bool softFound = false;
+    for (size_t i = 0; i < softPage.rows.size(); ++i) {
+        const Row& r = softPage.rows[i];
+        if (r.display != "aaaaa") continue;
+        assert(i + 1 < softPage.rows.size());
+        assert(r.sourceEnd == softPage.rows[i + 1].sourceBegin);
+        const size_t end = visualRowEnd(softPage, i, soft);
+        assert(end >= r.sourceBegin);
+        assert(end < r.sourceEnd);
+        assert(soft[end] == ' ');
+        softFound = true;
+    }
+    assert(softFound);
 }
 
 static void test_empty_and_trailing_newline() {
@@ -601,6 +747,7 @@ int main() {
     test_invalid_utf8_is_one_step();
     test_ime_undo_is_one_step();
     test_selection_replace();
+    test_empty_insert_keeps_selection();
     test_enter_does_not_continue_list();
     test_dirty_clears_on_undo_to_load();
     test_word_step();
@@ -618,6 +765,7 @@ int main() {
     test_escape();
     test_paragraph_join();
     test_unmatched_star_inside_strong();
+    test_nearest_emphasis_closer();
     test_strong_inside_em();
     test_active_block_is_source();
     test_rendered_heading_4_measured_bold();
