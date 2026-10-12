@@ -13,6 +13,7 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 static void test_insert_codepoint_undo() {
@@ -354,6 +355,43 @@ static void test_active_block_is_source() {
     assert(paragraph.find('*') == std::string::npos);
 }
 
+struct FaceLogMeasurer : Measurer {
+    mutable std::vector<std::pair<std::string, Face>> calls;
+    float width(std::string_view text, float, Face face) const override {
+        calls.emplace_back(std::string(text), face);
+        return 1.f;
+    }
+    float lineHeight(float sizePx) const override { return sizePx; }
+};
+
+static void test_rendered_heading_4_measured_bold() {
+    FaceLogMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    m.columnW = 1000;
+    std::string src = "#### Title\n\npara\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    size_t para = src.find("para");
+    Page page = layoutPage(src, blocks, para, m, measure);
+
+    const Row* heading = nullptr;
+    for (const Row& r : page.rows) {
+        if (r.kind == BlockKind::Heading) heading = &r;
+    }
+    assert(heading);
+    assert(!heading->sourceMode);
+    assert(heading->level == 4);
+    assert(heading->display == "Title");
+    assert(page.active != 0);
+
+    std::string seen;
+    for (const auto& call : measure.calls) {
+        if (seen.size() >= heading->display.size()) break;
+        seen += call.first;
+        assert(call.second == Face::Bold);
+    }
+    assert(seen == heading->display);
+}
+
 static void test_wrap_at_space() {
     StubMeasurer measure;
     LayoutMetrics m = testMetrics();
@@ -582,6 +620,7 @@ int main() {
     test_unmatched_star_inside_strong();
     test_strong_inside_em();
     test_active_block_is_source();
+    test_rendered_heading_4_measured_bold();
     test_wrap_at_space();
     test_wrap_codepoint();
     test_empty_and_trailing_newline();

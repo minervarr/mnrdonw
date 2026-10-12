@@ -6,7 +6,12 @@
 
 namespace {
 
-Face faceFor(SpanRole role) {
+bool renderedSmallHeading(bool sourceMode, BlockKind kind, int level) {
+    return !sourceMode && kind == BlockKind::Heading && level >= 4;
+}
+
+Face faceFor(SpanRole role, bool forceBold) {
+    if (forceBold) return Face::Bold;
     if (role == SpanRole::Em) return Face::Italic;
     if (role == SpanRole::Strong || role == SpanRole::StrongEm) return Face::Bold;
     return Face::Roman;
@@ -58,9 +63,10 @@ size_t mapDisplayToSource(const std::string& display, const std::vector<Span>& s
     return spans.back().sourceEnd;
 }
 
-Face faceAt(const std::vector<Span>& spans, size_t displayOff) {
+Face faceAt(const std::vector<Span>& spans, size_t displayOff, bool forceBold) {
+    if (forceBold) return Face::Bold;
     for (const Span& s : spans) {
-        if (s.displayBegin <= displayOff && displayOff < s.displayEnd) return faceFor(s.role);
+        if (s.displayBegin <= displayOff && displayOff < s.displayEnd) return faceFor(s.role, false);
     }
     return Face::Roman;
 }
@@ -141,10 +147,11 @@ struct Layouter {
             size_t lastFit = d;
             size_t lastSpace = static_cast<size_t>(-1);
             float w = 0;
+            const bool forceBold = renderedSmallHeading(sourceMode, kind, level);
             size_t i = d;
             while (i < display.size()) {
                 size_t n = utf8Next(display, i);
-                Face face = faceAt(spans, i);
+                Face face = faceAt(spans, i, forceBold);
                 float gw = measure.width(std::string_view(display).substr(i, n - i), sizePx, face);
                 if (w + gw > m.columnW && i > d) break;
                 w += gw;
@@ -385,11 +392,12 @@ size_t hitTest(const Page& page, float x, float y, const Measurer& measure) {
     if (x < row->textX) return gutterHit(*row);
     if (row->display.empty() || row->spans.empty()) return gutterHit(*row);
 
+    const bool forceBold = renderedSmallHeading(row->sourceMode, row->kind, row->level);
     float cx = row->textX;
     for (size_t si = 0; si < row->spans.size(); ++si) {
         const Span& s = row->spans[si];
         std::string_view piece = std::string_view(row->display).substr(s.displayBegin, s.displayEnd - s.displayBegin);
-        Face face = faceFor(s.role);
+        Face face = faceFor(s.role, forceBold);
         float w = measure.width(piece, row->sizePx, face);
         bool last = si + 1 == row->spans.size();
         if (x < cx + w || last) {
@@ -413,9 +421,10 @@ size_t hitTest(const Page& page, float x, float y, const Measurer& measure) {
 float caretX(const Page& page, size_t cursorByte, const Measurer& measure) {
     if (page.rows.empty()) return 0;
     const Row& row = page.rows[rowIndexForCursor(page, cursorByte)];
+    const bool forceBold = renderedSmallHeading(row.sourceMode, row.kind, row.level);
     float x = row.textX;
     for (const Span& s : row.spans) {
-        Face face = faceFor(s.role);
+        Face face = faceFor(s.role, forceBold);
         size_t d = s.displayBegin;
         while (d < s.displayEnd) {
             if (mapSpanToSource(s, d) >= cursorByte) return x;

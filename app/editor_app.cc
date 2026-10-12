@@ -33,15 +33,9 @@ FontStyle toStyle(Face face) {
     return FontStyle::Roman;
 }
 
-// Layout's face, plus Bold for headings 4–6. Layout stores only sizePx.
-Face faceFor(const Row& row, SpanRole role) {
-    if (role == SpanRole::Em) return Face::Italic;
-    if (role == SpanRole::Strong || role == SpanRole::StrongEm) return Face::Bold;
+// Same face layout measured with. Rendered headings 4–6 are Bold on every span.
+Face rowFace(const Row& row, SpanRole role) {
     if (!row.sourceMode && row.kind == BlockKind::Heading && row.level >= 4) return Face::Bold;
-    return Face::Roman;
-}
-
-Face faceMeasured(SpanRole role) {
     if (role == SpanRole::Em) return Face::Italic;
     if (role == SpanRole::Strong || role == SpanRole::StrongEm) return Face::Bold;
     return Face::Roman;
@@ -126,12 +120,11 @@ double nowSeconds() {
     return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
 }
 
-// Column-local x of a source byte. Uses the face layout measured with, so the
-// caret matches caretX. Headings 4–6 are drawn Bold on top of that measure.
+// Column-local x of a source byte. Same face layout measured and textStyled draws.
 float xInRow(const Row& row, size_t byte, const Measurer& measure) {
     float x = row.textX;
     for (const Span& s : row.spans) {
-        const Face face = faceMeasured(s.role);
+        const Face face = rowFace(row, s.role);
         size_t d = s.displayBegin;
         while (d < s.displayEnd) {
             if (mapSpanToSource(s, d) >= byte) return x;
@@ -628,7 +621,7 @@ void EditorApp::draw() {
                     while (d < span.displayEnd) {
                         const size_t dn = utf8Next(row.display, d);
                         x += measurer_->width(std::string_view(row.display).substr(d, dn - d),
-                                              row.sizePx, faceMeasured(span.role));
+                                              row.sizePx, rowFace(row, span.role));
                         d = dn;
                     }
                     continue;
@@ -638,7 +631,7 @@ void EditorApp::draw() {
                 while (d < span.displayEnd) {
                     const size_t dn = utf8Next(row.display, d);
                     x += measurer_->width(std::string_view(row.display).substr(d, dn - d),
-                                          row.sizePx, faceMeasured(span.role));
+                                          row.sizePx, rowFace(row, span.role));
                     d = dn;
                 }
                 const float spanW = x - spanX;
@@ -687,7 +680,7 @@ void EditorApp::draw() {
 
         float x = geom_.columnX + row.textX;
         for (const Span& span : row.spans) {
-            const Face face = faceFor(row, span.role);
+            const Face face = rowFace(row, span.role);
             size_t d = span.displayBegin;
             while (d < span.displayEnd) {
                 const size_t dn = utf8Next(row.display, d);
