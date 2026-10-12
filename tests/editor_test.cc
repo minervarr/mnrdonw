@@ -1,6 +1,8 @@
 #include "document.hh"
 #include "inline.hh"
+#include "layout.hh"
 #include "parse.hh"
+#include "stub_measure.hh"
 #include "utf8.hh"
 
 #include <cassert>
@@ -304,6 +306,138 @@ static void test_strong_inside_em() {
     assert(tail->role == SpanRole::Em);
 }
 
+static LayoutMetrics testMetrics() {
+    LayoutMetrics m;
+    m.body = 10;
+    m.h1 = 10 * 1.18f * 1.18f * 1.18f;
+    m.h2 = 10 * 1.18f * 1.18f;
+    m.h3 = 10 * 1.18f;
+    m.columnW = 50;
+    m.blockGap = 16;
+    m.listGap = 4;
+    m.gutter = 20;
+    return m;
+}
+
+static std::string kindDisplay(const Page& page, BlockKind kind) {
+    std::string s;
+    for (const Row& r : page.rows) {
+        if (r.kind == kind) s += r.display;
+    }
+    return s;
+}
+
+static void test_active_block_is_source() {
+    StubMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    std::string_view src = "# Hi\n\n**bold** word\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    size_t para = src.find("**bold**");
+    Page page = layoutPage(src, blocks, para, m, measure);
+    std::string heading = kindDisplay(page, BlockKind::Heading);
+    std::string paragraph = kindDisplay(page, BlockKind::Paragraph);
+    assert(heading == "Hi");
+    assert(heading.find('#') == std::string::npos);
+    assert(paragraph.find("**bold**") != std::string::npos);
+
+    Page page2 = layoutPage(src, blocks, 0, m, measure);
+    heading = kindDisplay(page2, BlockKind::Heading);
+    paragraph = kindDisplay(page2, BlockKind::Paragraph);
+    assert(heading.find('#') != std::string::npos);
+    assert(paragraph == "bold word" || (paragraph.find("bold") != std::string::npos &&
+                                        paragraph.find("word") != std::string::npos));
+    assert(paragraph.find('*') == std::string::npos);
+}
+
+static void test_wrap_at_space() {
+    StubMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    std::string src = "\naaaaa bbbbb\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    Page page = layoutPage(src, blocks, 0, m, measure);
+    bool found = false;
+    for (size_t i = 0; i < page.rows.size(); ++i) {
+        if (page.rows[i].display == "aaaaa") {
+            assert(i + 1 < page.rows.size());
+            assert(page.rows[i + 1].display.find("bbbbb") == 0);
+            found = true;
+        }
+    }
+    assert(found);
+}
+
+static void test_wrap_codepoint() {
+    StubMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    std::string src = "\nabcdefghij\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    Page page = layoutPage(src, blocks, 0, m, measure);
+    bool found = false;
+    for (const Row& r : page.rows) {
+        if (r.kind == BlockKind::Paragraph) {
+            assert(r.display.size() == 5);
+            found = true;
+            break;
+        }
+    }
+    assert(found);
+}
+
+static void test_empty_and_trailing_newline() {
+    StubMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    std::string_view empty = "";
+    std::vector<Block> none = parseBlocks(empty);
+    Page p0 = layoutPage(empty, none, 0, m, measure);
+    assert(p0.rows.size() == 1);
+    assert(p0.rows[0].sourceBegin == 0);
+    assert(p0.rows[0].sourceEnd == 0);
+
+    std::string_view src = "a\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    Page p1 = layoutPage(src, blocks, 0, m, measure);
+    bool sawA = false;
+    bool sawEmpty = false;
+    for (const Row& r : p1.rows) {
+        if (r.display == "a") sawA = true;
+        if (r.sourceBegin == 2) {
+            assert(r.display.empty());
+            sawEmpty = true;
+        }
+    }
+    assert(sawA);
+    assert(sawEmpty);
+}
+
+static void test_hit_rendered_bold() {
+    StubMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    std::string src = "\n**bold**\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    Page page = layoutPage(src, blocks, 0, m, measure);
+    const Row* para = nullptr;
+    for (const Row& r : page.rows) {
+        if (r.kind == BlockKind::Paragraph) para = &r;
+    }
+    assert(para);
+    float midY = para->y + para->h * 0.5f;
+    size_t b = src.find('b');
+    assert(hitTest(page, para->textX, midY, measure) == b);
+    assert(hitTest(page, 0.f, midY, measure) == para->contentBegin);
+}
+
+static void test_move_vertical_keeps_x() {
+    StubMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    std::string_view src = "abc\nabcdef\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    size_t cursor = 3;
+    Page page = layoutPage(src, blocks, cursor, m, measure);
+    float preferredX = caretX(page, cursor, measure);
+    size_t moved = moveVertical(page, cursor, preferredX, 1, measure);
+    assert(moved == 7);
+}
+
 int main() {
     test_insert_codepoint_undo();
     test_coalesce_breaks_on_newline();
@@ -328,5 +462,11 @@ int main() {
     test_paragraph_join();
     test_unmatched_star_inside_strong();
     test_strong_inside_em();
+    test_active_block_is_source();
+    test_wrap_at_space();
+    test_wrap_codepoint();
+    test_empty_and_trailing_newline();
+    test_hit_rendered_bold();
+    test_move_vertical_keeps_x();
     return 0;
 }
