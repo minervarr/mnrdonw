@@ -438,6 +438,43 @@ static void test_move_vertical_keeps_x() {
     assert(moved == 7);
 }
 
+static void test_fence_line_is_one_row() {
+    StubMeasurer measure;
+    LayoutMetrics m = testMetrics();
+    std::string src = "\n```\nint x;\n```\n";
+    std::vector<Block> blocks = parseBlocks(src);
+    Page page = layoutPage(src, blocks, 0, m, measure);
+    int intX = 0;
+    int justInt = 0;
+    int justSemi = 0;
+    int marker = 0;
+    for (const Row& r : page.rows) {
+        if (r.display == "int x;") ++intX;
+        if (r.display == "int") ++justInt;
+        if (r.display == "x;") ++justSemi;
+        if (r.kind == BlockKind::Fence && r.display.find('`') != std::string::npos) ++marker;
+    }
+    assert(intX == 1);
+    assert(justInt == 0);
+    assert(justSemi == 0);
+    assert(marker == 0);
+
+    std::string empty = "\n```\n```\n";
+    std::vector<Block> b2 = parseBlocks(empty);
+    Page p2 = layoutPage(empty, b2, 0, m, measure);
+    size_t openBegin = empty.find("```");
+    size_t openEnd = empty.find('\n', openBegin) + 1;
+    size_t closeBegin = empty.rfind("```");
+    int openRows = 0;
+    int closeRows = 0;
+    for (const Row& r : p2.rows) {
+        if (r.sourceBegin == openBegin && r.sourceEnd == openEnd) ++openRows;
+        if (r.sourceBegin == closeBegin) ++closeRows;
+    }
+    assert(openRows == 1);
+    assert(closeRows == 0);
+}
+
 int main() {
     test_insert_codepoint_undo();
     test_coalesce_breaks_on_newline();
@@ -468,5 +505,6 @@ int main() {
     test_empty_and_trailing_newline();
     test_hit_rendered_bold();
     test_move_vertical_keeps_x();
+    test_fence_line_is_one_row();
     return 0;
 }

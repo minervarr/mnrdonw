@@ -255,17 +255,26 @@ struct Layouter {
             size_t end = lineEnd(src, pos, interiorEnd);
             size_t eol = lineEol(src, pos, end);
             std::string display(src.substr(pos, eol - pos));
-            std::vector<Span> spans;
-            if (!display.empty()) {
+            Row r{};
+            r.sizePx = m.body;
+            r.display = std::move(display);
+            if (!r.display.empty()) {
                 Span s;
                 s.sourceBegin = pos;
                 s.sourceEnd = eol;
                 s.displayBegin = 0;
-                s.displayEnd = display.size();
+                s.displayEnd = r.display.size();
                 s.role = SpanRole::Plain;
-                spans.push_back(s);
+                r.spans.push_back(s);
             }
-            wrapRun(display, spans, pos, end, pos, m.body, false, b.kind, b.level, b.ordered);
+            r.sourceMode = false;
+            r.kind = b.kind;
+            r.level = b.level;
+            r.ordered = b.ordered;
+            r.sourceBegin = pos;
+            r.sourceEnd = end;
+            r.contentBegin = pos;
+            emit(std::move(r));
             pos = end;
         }
     }
