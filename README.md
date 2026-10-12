@@ -1,5 +1,18 @@
 # mnrdonw
 
-A one-document markdown editor, not built yet. The spec and the task list are [docs/superpowers/plans/2026-10-11-live-source-markdown-editor.md](docs/superpowers/plans/2026-10-11-live-source-markdown-editor.md).
+A one-document markdown editor. The caret's block shows the source. The rest of the page is styled prose.
 
-The caret's block shows the source. The rest of the page is styled prose. Build and run commands replace this note when the first task lands.
+## Build
+
+Debug, from this directory:
+
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+    cmake --build build
+
+## Test
+
+    ./build/editor_test
+
+## Run
+
+    ./build/mnrdonw fixtures/sample.md
