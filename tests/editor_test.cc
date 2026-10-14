@@ -1,7 +1,11 @@
+#include "desktop_entry.hh"
 #include "document.hh"
+#include "flow.hh"
 #include "inline.hh"
 #include "layout.hh"
+#include "margin.hh"
 #include "parse.hh"
+#include "recent.hh"
 #include "save.hh"
 #include "stub_measure.hh"
 #include "utf8.hh"
@@ -722,6 +726,113 @@ static void test_failed_save_keeps_original() {
     assert(!fileExists(dir + "/missing"));
 }
 
+static void test_page_margin_is_one_centimeter_until_the_column_would_collapse() {
+    assert(pageMargin(1.f, 800.f, 600.f) == 38.f);
+    assert(pageMargin(1.f, 200.f, 600.f) == 20.f);
+    assert(pageMargin(1.f, 100.f, 600.f) == 0.f);
+    assert(pageMargin(2.f, 2000.f, 2000.f) == 76.f);
+}
+
+static void test_pack_flow_wraps_when_the_next_name_does_not_fit() {
+    const std::vector<FlowSlot> slots = packFlow(100.f, 10.f, 20.f, 8.f, {30.f, 40.f, 50.f, 200.f});
+    assert(slots.size() == 4);
+    assert(slots[0].index == 0 && slots[0].x == 0.f && slots[0].y == 0.f && slots[0].w == 30.f);
+    assert(slots[1].index == 1 && slots[1].x == 40.f && slots[1].y == 0.f && slots[1].w == 40.f);
+    assert(slots[2].index == 2 && slots[2].x == 0.f && slots[2].y == 28.f && slots[2].w == 50.f);
+    assert(slots[3].index == 3 && slots[3].x == 0.f && slots[3].y == 56.f && slots[3].w == 100.f);
+    assert(slots[0].h == 20.f);
+}
+
+static void test_pack_flow_empty_and_non_positive_width() {
+    assert(packFlow(100.f, 10.f, 20.f, 8.f, {}).empty());
+    const std::vector<FlowSlot> slots = packFlow(0.f, 10.f, 20.f, 8.f, {30.f, 40.f});
+    assert(slots.size() == 2);
+    assert(slots[0].x == 0.f && slots[0].y == 0.f && slots[0].w == 0.f && slots[0].h == 20.f);
+    assert(slots[1].x == 0.f && slots[1].y == 28.f && slots[1].w == 0.f);
+}
+
+static void test_parse_recent_keeps_first_copy() {
+    const std::vector<std::string> paths = parseRecent("a\n\na\nb\n");
+    assert(paths.size() == 2);
+    assert(paths[0] == "a");
+    assert(paths[1] == "b");
+}
+
+static void test_remember_moves_to_front_and_caps() {
+    const std::vector<std::string> moved = rememberPath({"/a", "/b", "/c"}, "/b", 40);
+    assert(moved.size() == 3);
+    assert(moved[0] == "/b" && moved[1] == "/a" && moved[2] == "/c");
+
+    std::vector<std::string> many;
+    for (int i = 0; i < 40; ++i) many.push_back(std::to_string(i));
+    const std::vector<std::string> capped = rememberPath(many, "new", 40);
+    assert(capped.size() == 40);
+    assert(capped[0] == "new");
+    assert(capped.back() == "38");
+
+    const std::vector<std::string> ignored = rememberPath({"/a"}, "", 40);
+    assert(ignored.size() == 1 && ignored[0] == "/a");
+}
+
+static void test_forget_removes_every_copy() {
+    const std::vector<std::string> left = forgetPath({"/a", "/b", "/a"}, "/a");
+    assert(left.size() == 1);
+    assert(left[0] == "/b");
+}
+
+static void test_recent_round_trip() {
+    const std::string dir = makeTempDir();
+    const std::string file = dir + "/recent.txt";
+    std::string error;
+    assert(saveRecent(file, {"/a", "/b"}, error));
+    assert(!fileExists(file + ".tmp"));
+    assert(readFile(file) == "/a\n/b\n");
+    const RecentLoad loaded = loadRecent(file);
+    assert(loaded.ok);
+    assert(loaded.paths.size() == 2);
+    assert(loaded.paths[0] == "/a" && loaded.paths[1] == "/b");
+
+    const RecentLoad missing = loadRecent(dir + "/no-such.txt");
+    assert(missing.ok);
+    assert(missing.paths.empty());
+}
+
+static void test_unreadable_recent_is_not_rewritten() {
+    const std::string dir = makeTempDir();
+    const std::string bogus = dir + "/recent.txt";
+    assert(mkdir(bogus.c_str(), 0755) == 0);
+    const RecentLoad loaded = loadRecent(bogus);
+    assert(!loaded.ok);
+    assert(loaded.paths.empty());
+    assert(!fileExists(bogus + ".tmp"));
+    struct stat st;
+    assert(stat(bogus.c_str(), &st) == 0);
+    assert(S_ISDIR(st.st_mode));
+
+    std::string error;
+    assert(!saveRecent(dir + "/missing/recent.txt", {"/a"}, error));
+    assert(!error.empty());
+    assert(!fileExists(dir + "/missing/recent.txt"));
+}
+
+static void test_desktop_entry_quotes_the_executable() {
+    const std::string text = desktopEntryText("/usr/bin/mnrdonw");
+    const std::string expect =
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Version=1.0\n"
+        "Name=mnrdonw\n"
+        "Terminal=false\n"
+        "Categories=Office;TextEditor;\n"
+        "MimeType=text/markdown;text/x-markdown;\n"
+        "StartupWMClass=io.nava.mnrdonw\n"
+        "Exec=\"/usr/bin/mnrdonw\" %f\n";
+    assert(text == expect);
+    assert(desktopEntryText("").empty());
+    assert(desktopEntryText("/tmp/a\"b").empty());
+    assert(desktopEntryText("/tmp/a\nb").empty());
+}
+
 static void test_untitled() {
     std::string home = cwdNow();
 
@@ -777,6 +888,15 @@ int main() {
     test_fence_line_is_one_row();
     test_save_round_trip();
     test_failed_save_keeps_original();
+    test_page_margin_is_one_centimeter_until_the_column_would_collapse();
+    test_pack_flow_wraps_when_the_next_name_does_not_fit();
+    test_pack_flow_empty_and_non_positive_width();
+    test_parse_recent_keeps_first_copy();
+    test_remember_moves_to_front_and_caps();
+    test_forget_removes_every_copy();
+    test_recent_round_trip();
+    test_unreadable_recent_is_not_rewritten();
+    test_desktop_entry_quotes_the_executable();
     test_untitled();
     return 0;
 }

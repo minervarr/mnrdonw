@@ -12,6 +12,11 @@ set(APP_SHELL_WINDOW_TITLE "mnrdonw" CACHE STRING
     "Window title shown to the user.")
 set(APP_SHELL_APP_ID "io.nava.mnrdonw" CACHE STRING
     "Wayland app_id / desktop-file base name.")
+set(APP_SHELL_STATE_HOME ".mnrdonw" CACHE STRING
+    "Directory under the home directory for files this app writes." FORCE)
+
+set(ARC_BUILD_ARCHIVE OFF CACHE BOOL "" FORCE)
+set(ARC_BUILD_FS_TESTS ON CACHE BOOL "" FORCE)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_executable(editor_test
@@ -22,6 +27,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         editor/inline.cc
         editor/layout.cc
         editor/save.cc
+        editor/flow.cc
+        editor/recent.cc
+        editor/desktop_entry.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/firstparty/framework/vk_canvas/core/text_buffer.cc
     )
     target_include_directories(editor_test PRIVATE
@@ -43,6 +51,7 @@ app_shell_generate_min_text_size(
 add_subdirectory(libs/firstparty/framework/app_shell)
 add_dependencies(app_shell generate_ui_min_text_size)
 
+add_subdirectory(libs/firstparty/archive_engine/core ${CMAKE_BINARY_DIR}/archive_engine)
 add_subdirectory(${VK_CANVAS_DIR}/core ${CMAKE_BINARY_DIR}/vk_canvas_core)
 add_subdirectory(${VK_CANVAS_DIR}/platform/linux ${CMAKE_BINARY_DIR}/vk_canvas_wayland)
 
@@ -84,13 +93,17 @@ add_custom_target(mnrdonw_fonts DEPENDS ${MNRDONW_FONT_OUTPUTS})
 add_executable(mnrdonw
     app/main.cc
     app/editor_app.cc
+    app/linux_desktop.cc
     editor/utf8.cc
     editor/document.cc
     editor/parse.cc
     editor/inline.cc
     editor/layout.cc
-    editor/save.cc)
+    editor/save.cc
+    editor/flow.cc
+    editor/recent.cc
+    editor/desktop_entry.cc)
 set_target_properties(mnrdonw PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 target_include_directories(mnrdonw PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(mnrdonw PRIVATE app_shell app_shell_wayland vk_canvas_wayland)
+target_link_libraries(mnrdonw PRIVATE app_shell app_shell_wayland vk_canvas_wayland arc_fs)
 add_dependencies(mnrdonw generate_ui_min_text_size mnrdonw_shaders mnrdonw_font_shaders mnrdonw_fonts)

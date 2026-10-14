@@ -1,10 +1,12 @@
 #pragma once
 
 #include "editor/document.hh"
+#include "editor/flow.hh"
 #include "editor/layout.hh"
 #include "editor/parse.hh"
 #include "frame_input_view.hh"
 
+#include "arc/fs/walk.hh"
 #include "ui_metrics.hh"
 
 #include <cstddef>
@@ -44,12 +46,51 @@ private:
         float body = 0;
         float lineH = 0;
         float nameSize = 0;
+        float margin = 0;
+        float contentX = 0;
+        float contentY = 0;
+        float contentW = 0;
+    };
+
+    struct BrowseRow {
+        std::string label;
+        std::string path;
+        bool isDir = false;
+    };
+
+    struct HomeHit {
+        float newX = 0;
+        float newW = 0;
+        float browseX = 0;
+        float browseW = 0;
+        bool showBrowse = false;
+        float flowTop = 0;
+        float flowView = 0;
+        float rowH = 0;
     };
 
     bool readLaunchFile(int argc, char** argv);
     bool initGpu();
+    void loadRecentList();
+    void storeRecent();
+    void touchRecent(const std::string& path);
+    void dropRecent(const std::string& path);
+    bool openFile(const std::string& path, bool fromLaunch);
+    void openNew();
+    void goHome();
+    void adoptListing(const std::vector<arc::fs::Entry>& entries);
+    void reloadBrowse();
+    void enterDirectory(const std::string& path);
+    void layoutFrame();
+    HomeHit layoutHome();
+    void clampHomeScroll(const HomeHit& hit, float contentHeight);
+    void handleHomeInput();
+    void handleEscape();
+    void saveNow();
     void layoutNow();
     void handleInput();
+    void drawHome();
+    void drawWrite();
     void draw();
     void pokeCaret();
     void clampScroll();
@@ -72,6 +113,17 @@ private:
 
     std::string path_;
     std::string saveError_;
+    std::string homeError_;
+    std::string browseDir_;
+    std::vector<std::string> recent_;
+    std::vector<BrowseRow> browseRows_;
+    std::vector<FlowSlot> homeSlots_;
+    enum class Screen { Home, Write };
+    Screen screen_ = Screen::Home;
+    bool browsing_ = false;
+    bool discardArmed_ = false;
+    bool recentWritable_ = true;
+    float homeScroll_ = 0;
     bool running_ = false;
     bool stale_ = true;
     bool caretOn_ = true;
